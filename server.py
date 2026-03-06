@@ -28,6 +28,8 @@ def reset_state():
     win_cells = []
     is_draw = False
 
+reset_state()  # initialise on import (works with both gunicorn and direct run)
+
 
 # ── Game logic ───────────────────────────────────────────────────────
 def get_target_row(col):
