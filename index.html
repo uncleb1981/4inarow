@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced 4 in a Row</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      color: white;
+    }
+
+    h1 { font-size: 2.5rem; margin-bottom: 20px; letter-spacing: 3px; text-transform: uppercase; }
+
+    #turn-indicator {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 12px; font-size: 1rem;
+    }
+    .disc-preview { width: 24px; height: 24px; border-radius: 50%; }
+
+    #status {
+      font-size: 1.3rem; margin-bottom: 20px;
+      height: 2rem; font-weight: bold;
+    }
+    .player-red    { color: #ff0000; }
+    .player-yellow { color: #ffff00; }
+    .draw          { color: #aaa; }
+
+    #board-wrapper {
+      background: #2471a3; border-radius: 16px; padding: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+
+    #board {
+      display: grid;
+      grid-template-columns: repeat(9, 70px);
+      grid-template-rows: repeat(6, 70px);
+      gap: 8px;
+    }
+
+    .cell {
+      width: 70px; height: 70px; border-radius: 50%;
+      background: #1a1a2e; cursor: pointer;
+      transition: background 0.12s ease;
+    }
+    .cell.red    { background: #ff0000; cursor: default; }
+    .cell.yellow { background: #ffff00; cursor: default; }
+    .cell.win    { animation: pulse 0.6s infinite alternate; }
+
+    @keyframes pulse {
+      from { filter: brightness(1); }
+      to   { filter: brightness(1.6); }
+    }
+
+    #reset-btn {
+      margin-top: 24px; padding: 12px 36px;
+      font-size: 1rem; font-weight: bold; letter-spacing: 1px;
+      background: #2471a3; color: white; border: none;
+      border-radius: 8px; cursor: pointer; transition: background 0.2s;
+    }
+    #reset-btn:hover { background: #1a5276; }
+  </style>
+</head>
+<body>
+
+  <h1>Advanced 4 in a Row</h1>
+
+  <div id="turn-indicator">
+    <div class="disc-preview" id="disc-preview"></div>
+    <span id="turn-text">Your turn</span>
+  </div>
+
+  <div id="status"></div>
+
+  <div id="board-wrapper">
+    <div id="board"></div>
+  </div>
+
+  <button id="reset-btn">New Game</button>
+
+  <script>
+    const ROWS = 6, COLS = 9;
+    const boardEl  = document.getElementById('board');
+    const statusEl = document.getElementById('status');
+    const turnText = document.getElementById('turn-text');
+    const discPrev = document.getElementById('disc-preview');
+    const resetBtn = document.getElementById('reset-btn');
+
+    let busy = false; // prevent clicks while waiting for server
+
+    // ── Build the grid DOM ──────────────────────────────────────────
+    function buildGrid() {
+      boardEl.innerHTML = '';
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          cell.dataset.row = r;
+          cell.dataset.col = c;
+          boardEl.appendChild(cell);
+        }
+      }
+    }
+
+    // ── Render board state from server ──────────────────────────────
+    function renderState(state) {
+      // Update each cell
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const cell = boardEl.querySelector(`[data-row="${r}"][data-col="${c}"]`);
+          cell.className = 'cell';
+          cell.style.background = '';
+          const val = state.board[r][c];
+          if (val) cell.classList.add(val);
+        }
+      }
+
+      // Highlight winning cells
+      if (state.winCells && state.winCells.length) {
+        state.winCells.forEach(([r, c]) => {
+          boardEl.querySelector(`[data-row="${r}"][data-col="${c}"]`).classList.add('win');
+        });
+      }
+
+      // Update status text
+      statusEl.className = '';
+      if (state.winner === 'red') {
+        statusEl.textContent = 'You win! 🎉';
+        statusEl.className = 'player-red';
+      } else if (state.winner === 'yellow') {
+        statusEl.textContent = 'Computer wins! 🤖';
+        statusEl.className = 'player-yellow';
+      } else if (state.draw) {
+        statusEl.textContent = "It's a draw!";
+        statusEl.className = 'draw';
+      } else {
+        statusEl.textContent = '';
+      }
+
+      // Turn indicator
+      if (state.gameOver) {
+        turnText.textContent = '';
+        discPrev.style.background = 'transparent';
+      } else {
+        turnText.textContent = 'Your turn';
+        discPrev.style.background = '#ff0000';
+      }
+    }
+
+    // ── Fetch helpers ───────────────────────────────────────────────
+    async function fetchState() {
+      const res = await fetch('/state');
+      return res.json();
+    }
+
+    async function sendMove(col) {
+      const res = await fetch('/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ col })
+      });
+      return res.json();
+    }
+
+    async function sendReset() {
+      const res = await fetch('/reset', { method: 'POST' });
+      return res.json();
+    }
+
+    // ── Click a column ──────────────────────────────────────────────
+    boardEl.addEventListener('click', async e => {
+      if (busy) return;
+      const cell = e.target.closest('.cell');
+      if (!cell) return;
+
+      busy = true;
+      turnText.textContent = 'Computer thinking...';
+      discPrev.style.background = '#ffff00';
+
+      const state = await sendMove(+cell.dataset.col);
+      renderState(state);
+      busy = false;
+    });
+
+    // ── Column hover ────────────────────────────────────────────────
+    boardEl.addEventListener('mouseover', e => {
+      if (busy) return;
+      const cell = e.target.closest('.cell');
+      if (!cell) return;
+      const col = +cell.dataset.col;
+      boardEl.querySelectorAll(`[data-col="${col}"]`).forEach(c => {
+        if (!c.classList.contains('red') && !c.classList.contains('yellow'))
+          c.style.background = '#2c3e50';
+      });
+    });
+
+    boardEl.addEventListener('mouseout', e => {
+      const cell = e.target.closest('.cell');
+      if (!cell) return;
+      const col = +cell.dataset.col;
+      boardEl.querySelectorAll(`[data-col="${col}"]`).forEach(c => {
+        c.style.background = '';
+      });
+    });
+
+    // ── Reset button ────────────────────────────────────────────────
+    resetBtn.addEventListener('click', async () => {
+      busy = true;
+      const state = await sendReset();
+      renderState(state);
+      busy = false;
+    });
+
+    // ── Init ────────────────────────────────────────────────────────
+    async function init() {
+      buildGrid();
+      const state = await fetchState();
+      renderState(state);
+    }
+
+    init();
+  </script>
+</body>
+</html>
