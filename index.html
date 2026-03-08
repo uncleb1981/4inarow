@@ -1,1 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced 4 in a Row</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #1a1a2e;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', sans-serif; color: white;
+    }
+    :root {
+      --cell: min(70px, calc((100vw - 80px) / 9));
+      --gap: max(4px, calc(var(--cell) * 0.11));
+    }
+    h1 {
+      font-size: clamp(1.2rem, 5vw, 2.5rem);
+      margin-bottom: 16px; letter-spacing: 2px; text-transform: uppercase;
+      text-align: center; padding: 0 12px;
+    }
+    #turn-indicator {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 10px; font-size: clamp(0.85rem, 3vw, 1rem);
+    }
+    .disc-preview { width: 20px; height: 20px; border-radius: 50%; }
+    #status {
+      font-size: clamp(1rem, 4vw, 1.3rem);
+      margin-bottom: 16px; height: 2rem; font-weight: bold; text-align: center;
+    }
+    .player-red    { color: #ff0000; }
+    .player-yellow { color: #ffff00; }
+    .draw          { color: #aaa; }
+    #board-wrapper {
+      background: #2471a3; border-radius: 16px;
+      padding: max(8px, calc(var(--cell) * 0.2));
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(9, var(--cell));
+      grid-template-rows: repeat(6, var(--cell));
+      gap: var(--gap);
+    }
+    .cell {
+      width: var(--cell); height: var(--cell); border-radius: 50%;
+      background: #1a1a2e; cursor: pointer;
+      transition: background 0.12s ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .cell.red    { background: #ff0000 !important; cursor: default; }
+    .cell.yellow { background: #ffff00 !important; cursor: default; }
+    .cell.win    { animation: pulse 0.6s infinite alternate; }
+    @keyframes pulse {
+      from { filter: brightness(1); }
+      to   { filter: brightness(1.6); }
+    }
+    #reset-btn {
+      margin-top: 20px; padding: 12px 36px;
+      font-size: 1rem; font-weight: bold; letter-spacing: 1px;
+      background: #2471a3; color: white; border: none;
+      border-radius: 8px; cursor: pointer; transition: background 0.2s;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #reset-btn:hover { background: #1a5276; }
+    @media (hover: none) {
+      .cell:not(.red):not(.yellow) { background: #1a1a2e !important; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Advanced 4 in a Row</h1>
+  <div id="turn-indicator">
+    <div class="disc-preview" id="disc-preview"></div>
+    <span id="turn-text">Your turn</span>
+  </div>
+  <div id="status"></div>
+  <div id="board-wrapper"><div id="board"></div></div>
+  <button id="reset-btn">New Game</button>
+  <script>
+    const ROWS = 6, COLS = 9;
+    const RED = 'red', YELLOW = 'yellow', EMPTY = null;
+    let board, currentPlayer, gameOver, computerThinking;
+    const boardEl  = document.getElementById('board');
+    const statusEl = document.getElementById('status');
+    const turnText = document.getElementById('turn-text');
+    const discPrev = document.getElementById('disc-preview');
+    const resetBtn = document.getElementById('reset-btn');
+
+    function getTargetRow(col) {
+      for (let r = ROWS - 1; r >= 0; r--)
+        if (board[r][col] === EMPTY) return r;
+      return -1;
+    }
+    function getCell(r, c) {
+      return boardEl.querySelector(`[data-row="${r}"][data-col="${c}"]`);
+    }
+    function getValidCols() {
+      return [...Array(COLS).keys()].filter(c => getTargetRow(c) !== -1);
+    }
+    function checkWinFor(row, col, player) {
+      const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+      for (const [dr, dc] of dirs) {
+        const line = [[row, col]];
+        for (let s = 1; s <= 3; s++) {
+          const r = row+dr*s, c = col+dc*s;
+          if (r<0||r>=ROWS||c<0||c>=COLS||board[r][c]!==player) break;
+          line.push([r,c]);
+        }
+        for (let s = 1; s <= 3; s++) {
+          const r = row-dr*s, c = col-dc*s;
+          if (r<0||r>=ROWS||c<0||c>=COLS||board[r][c]!==player) break;
+          line.push([r,c]);
+        }
+        if (line.length >= 4) return line;
+      }
+      return null;
+    }
+    function scoreWindow(w, player) {
+      const opp = player===YELLOW?RED:YELLOW;
+      const p=w.filter(x=>x===player).length, e=w.filter(x=>x===EMPTY).length, o=w.filter(x=>x===opp).length;
+      let s=0;
+      if(p===4)s+=100000; else if(p===3&&e===1)s+=60; else if(p===2&&e===2)s+=10;
+      if(o===3&&e===1)s-=80;
+      return s;
+    }
+    function scoreBoard() {
+      let score=0;
+      const mid=Math.floor(COLS/2);
+      for(let r=0;r<ROWS;r++) if(board[r][mid]===YELLOW) score+=6;
+      for(let r=0;r<ROWS;r++)
+        for(let c=0;c<=COLS-4;c++)
+          score+=scoreWindow([board[r][c],board[r][c+1],board[r][c+2],board[r][c+3]],YELLOW);
+      for(let c=0;c<COLS;c++)
+        for(let r=0;r<=ROWS-4;r++)
+          score+=scoreWindow([board[r][c],board[r+1][c],board[r+2][c],board[r+3][c]],YELLOW);
+      for(let r=0;r<=ROWS-4;r++)
+        for(let c=0;c<=COLS-4;c++)
+          score+=scoreWindow([board[r][c],board[r+1][c+1],board[r+2][c+2],board[r+3][c+3]],YELLOW);
+      for(let r=0;r<=ROWS-4;r++)
+        for(let c=3;c<COLS;c++)
+          score+=scoreWindow([board[r][c],board[r+1][c-1],board[r+2][c-2],board[r+3][c-3]],YELLOW);
+      return score;
+    }
+    function minimax(depth, alpha, beta, max) {
+      const valid = getValidCols().sort((a,b)=>Math.abs(Math.floor(COLS/2)-a)-Math.abs(Math.floor(COLS/2)-b));
+      if(!valid.length) return [null,0];
+      if(depth===0) return [null,scoreBoard()];
+      if(max) {
+        let best=-Infinity, col=valid[0];
+        for(const c of valid) {
+          const r=getTargetRow(c); board[r][c]=YELLOW;
+          if(checkWinFor(r,c,YELLOW)){board[r][c]=EMPTY;return[c,100000+depth];}
+          const[,s]=minimax(depth-1,alpha,beta,false); board[r][c]=EMPTY;
+          if(s>best){best=s;col=c;} alpha=Math.max(alpha,best); if(alpha>=beta)break;
+        }
+        return [col,best];
+      } else {
+        let best=Infinity, col=valid[0];
+        for(const c of valid) {
+          const r=getTargetRow(c); board[r][c]=RED;
+          if(checkWinFor(r,c,RED)){board[r][c]=EMPTY;return[c,-(100000+depth)];}
+          const[,s]=minimax(depth-1,alpha,beta,true); board[r][c]=EMPTY;
+          if(s<best){best=s;col=c;} beta=Math.min(beta,best); if(alpha>=beta)break;
+        }
+        return [col,best];
+      }
+    }
+    function computerPickCol() {
+      const [col]=minimax(5,-Infinity,Infinity,true);
+      return col!==null?col:getValidCols()[0];
+    }
+    function placePiece(col) {
+      const row=getTargetRow(col); if(row===-1)return;
+      board[row][col]=currentPlayer;
+      getCell(row,col).classList.add(currentPlayer);
+      const win=checkWinFor(row,col,currentPlayer);
+      if(win){
+        win.forEach(([r,c])=>getCell(r,c).classList.add('win'));
+        statusEl.textContent=currentPlayer===RED?'You win! 🎉':'Computer wins! 🤖';
+        statusEl.className=currentPlayer===RED?'player-red':'player-yellow';
+        gameOver=true; turnText.textContent=''; discPrev.style.background='transparent'; return;
+      }
+      if(board[0].every(c=>c!==EMPTY)){
+        statusEl.textContent="It's a draw!"; statusEl.className='draw';
+        gameOver=true; turnText.textContent=''; discPrev.style.background='transparent'; return;
+      }
+      currentPlayer=currentPlayer===RED?YELLOW:RED;
+      if(currentPlayer===YELLOW){
+        computerThinking=true; turnText.textContent='Computer thinking...'; discPrev.style.background='#ffff00';
+        setTimeout(()=>{placePiece(computerPickCol());computerThinking=false;},300);
+      } else {
+        turnText.textContent='Your turn'; discPrev.style.background='#ff0000';
+      }
+    }
+    boardEl.addEventListener('click',e=>{
+      if(gameOver||computerThinking)return;
+      const cell=e.target.closest('.cell');
+      if(!cell||currentPlayer!==RED)return;
+      placePiece(+cell.dataset.col);
+    });
+    boardEl.addEventListener('mouseover',e=>{
+      if(gameOver||computerThinking)return;
+      const cell=e.target.closest('.cell'); if(!cell)return;
+      boardEl.querySelectorAll(`[data-col="${cell.dataset.col}"]`).forEach(c=>{
+        if(!c.classList.contains(RED)&&!c.classList.contains(YELLOW)) c.style.background='#2c3e50';
+      });
+    });
+    boardEl.addEventListener('mouseout',e=>{
+      const cell=e.target.closest('.cell'); if(!cell)return;
+      boardEl.querySelectorAll(`[data-col="${cell.dataset.col}"]`).forEach(c=>{c.style.background='';});
+    });
+    function startGame(){
+      board=Array.from({length:ROWS},()=>Array(COLS).fill(EMPTY));
+      currentPlayer=RED; gameOver=false; computerThinking=false;
+      statusEl.textContent=''; statusEl.className='';
+      turnText.textContent='Your turn'; discPrev.style.background='#ff0000';
+      boardEl.innerHTML='';
+      for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+        const cell=document.createElement('div');
+        cell.classList.add('cell'); cell.dataset.row=r; cell.dataset.col=c;
+        boardEl.appendChild(cell);
+      }
+    }
+    resetBtn.addEventListener('click',startGame);
+    startGame();
+  </script>
+</body>
+</html>
 
