@@ -34,6 +34,7 @@
     .player-red    { color: #ff0000; }
     .player-yellow { color: #ffff00; }
     .draw          { color: #aaa; }
+    .cheater       { color: #ff69b4; }
     #board-wrapper {
       background: #2471a3; border-radius: 16px;
       padding: max(8px, calc(var(--cell) * 0.2));
@@ -59,15 +60,36 @@
       from { filter: brightness(1); }
       to   { filter: brightness(1.6); }
     }
-    #reset-btn {
-      margin-top: 20px; padding: 12px 36px;
+
+    #legend {
+      margin-top: 14px;
+      font-size: clamp(0.8rem, 2.5vw, 0.95rem);
+      color: #aaa;
+      display: flex; gap: 20px;
+    }
+    #legend span { display: flex; align-items: center; gap: 6px; }
+    .legend-dot {
+      width: 14px; height: 14px; border-radius: 50%; display: inline-block;
+    }
+
+    #buttons {
+      margin-top: 18px;
+      display: flex; gap: 12px;
+    }
+    button {
+      padding: 12px 28px;
       font-size: 1rem; font-weight: bold; letter-spacing: 1px;
-      background: #2471a3; color: white; border: none;
-      border-radius: 8px; cursor: pointer; transition: background 0.2s;
+      border: none; border-radius: 8px; cursor: pointer;
+      transition: background 0.2s;
       touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
     }
+    #reset-btn { background: #2471a3; color: white; }
     #reset-btn:hover { background: #1a5276; }
+    #undo-btn { background: #6c3483; color: white; }
+    #undo-btn:hover { background: #512e6a; }
+    #undo-btn:disabled { background: #333; color: #666; cursor: default; }
+
     @media (hover: none) {
       .cell:not(.red):not(.yellow) { background: #1a1a2e !important; }
     }
@@ -75,22 +97,40 @@
 </head>
 <body>
   <h1>Advanced 4 in a Row</h1>
+
   <div id="turn-indicator">
     <div class="disc-preview" id="disc-preview"></div>
     <span id="turn-text">Your turn</span>
   </div>
+
   <div id="status"></div>
+
   <div id="board-wrapper"><div id="board"></div></div>
-  <button id="reset-btn">New Game</button>
+
+  <div id="legend">
+    <span><div class="legend-dot" style="background:#ff0000"></div> Red = You</span>
+    <span><div class="legend-dot" style="background:#ffff00"></div> Yellow = AI</span>
+  </div>
+
+  <div id="buttons">
+    <button id="reset-btn">New Game</button>
+    <button id="undo-btn" disabled>Undo</button>
+  </div>
+
   <script>
     const ROWS = 6, COLS = 9;
     const RED = 'red', YELLOW = 'yellow', EMPTY = null;
+
     let board, currentPlayer, gameOver, computerThinking;
-    const boardEl  = document.getElementById('board');
-    const statusEl = document.getElementById('status');
-    const turnText = document.getElementById('turn-text');
-    const discPrev = document.getElementById('disc-preview');
-    const resetBtn = document.getElementById('reset-btn');
+    let moveHistory = [];
+    let usedUndo = false;
+
+    const boardEl   = document.getElementById('board');
+    const statusEl  = document.getElementById('status');
+    const turnText  = document.getElementById('turn-text');
+    const discPrev  = document.getElementById('disc-preview');
+    const resetBtn  = document.getElementById('reset-btn');
+    const undoBtn   = document.getElementById('undo-btn');
 
     function getTargetRow(col) {
       for (let r = ROWS - 1; r >= 0; r--)
@@ -103,6 +143,7 @@
     function getValidCols() {
       return [...Array(COLS).keys()].filter(c => getTargetRow(c) !== -1);
     }
+
     function checkWinFor(row, col, player) {
       const dirs = [[0,1],[1,0],[1,1],[1,-1]];
       for (const [dr, dc] of dirs) {
@@ -121,6 +162,7 @@
       }
       return null;
     }
+
     function scoreWindow(w, player) {
       const opp = player===YELLOW?RED:YELLOW;
       const p=w.filter(x=>x===player).length, e=w.filter(x=>x===EMPTY).length, o=w.filter(x=>x===opp).length;
@@ -175,61 +217,157 @@
       const [col]=minimax(5,-Infinity,Infinity,true);
       return col!==null?col:getValidCols()[0];
     }
+
+    function updateUndoBtn() {
+      const hasHumanMove = moveHistory.some(m => m.player === RED);
+      undoBtn.disabled = gameOver || computerThinking || !hasHumanMove;
+    }
+
     function placePiece(col) {
-      const row=getTargetRow(col); if(row===-1)return;
-      board[row][col]=currentPlayer;
-      getCell(row,col).classList.add(currentPlayer);
-      const win=checkWinFor(row,col,currentPlayer);
-      if(win){
-        win.forEach(([r,c])=>getCell(r,c).classList.add('win'));
-        statusEl.textContent=currentPlayer===RED?'You win! 🎉':'Computer wins! 🤖';
-        statusEl.className=currentPlayer===RED?'player-red':'player-yellow';
-        gameOver=true; turnText.textContent=''; discPrev.style.background='transparent'; return;
+      const row = getTargetRow(col); if(row===-1) return;
+
+      board[row][col] = currentPlayer;
+      getCell(row, col).classList.add(currentPlayer);
+      moveHistory.push({row, col, player: currentPlayer});
+
+      const win = checkWinFor(row, col, currentPlayer);
+      if (win) {
+        win.forEach(([r,c]) => getCell(r,c).classList.add('win'));
+        if (currentPlayer === RED) {
+          if (usedUndo) {
+            statusEl.textContent = 'Cheater! 🃏';
+            statusEl.className = 'cheater';
+          } else {
+            statusEl.textContent = 'You win! 🎉';
+            statusEl.className = 'player-red';
+          }
+        } else {
+          statusEl.textContent = 'Computer wins! 🤖';
+          statusEl.className = 'player-yellow';
+        }
+        gameOver = true;
+        turnText.textContent = '';
+        discPrev.style.background = 'transparent';
+        updateUndoBtn();
+        return;
       }
-      if(board[0].every(c=>c!==EMPTY)){
-        statusEl.textContent="It's a draw!"; statusEl.className='draw';
-        gameOver=true; turnText.textContent=''; discPrev.style.background='transparent'; return;
+
+      if (board[0].every(c => c !== EMPTY)) {
+        statusEl.textContent = "It's a draw!";
+        statusEl.className = 'draw';
+        gameOver = true;
+        turnText.textContent = '';
+        discPrev.style.background = 'transparent';
+        updateUndoBtn();
+        return;
       }
-      currentPlayer=currentPlayer===RED?YELLOW:RED;
-      if(currentPlayer===YELLOW){
-        computerThinking=true; turnText.textContent='Computer thinking...'; discPrev.style.background='#ffff00';
-        setTimeout(()=>{placePiece(computerPickCol());computerThinking=false;},300);
+
+      currentPlayer = currentPlayer === RED ? YELLOW : RED;
+      if (currentPlayer === YELLOW) {
+        computerThinking = true;
+        turnText.textContent = 'Computer thinking...';
+        discPrev.style.background = '#ffff00';
+        updateUndoBtn();
+        setTimeout(() => {
+          placePiece(computerPickCol());
+          computerThinking = false;
+          updateUndoBtn();
+        }, 300);
       } else {
-        turnText.textContent='Your turn'; discPrev.style.background='#ff0000';
+        turnText.textContent = 'Your turn';
+        discPrev.style.background = '#ff0000';
+        updateUndoBtn();
       }
     }
-    boardEl.addEventListener('click',e=>{
-      if(gameOver||computerThinking)return;
-      const cell=e.target.closest('.cell');
-      if(!cell||currentPlayer!==RED)return;
+
+    function undoMove() {
+      if (undoBtn.disabled) return;
+      let lastHumanIdx = -1;
+      for (let i = moveHistory.length - 1; i >= 0; i--) {
+        if (moveHistory[i].player === RED) { lastHumanIdx = i; break; }
+      }
+      if (lastHumanIdx === -1) return;
+
+      const toRemove = moveHistory.splice(lastHumanIdx);
+      toRemove.forEach(({row, col}) => {
+        board[row][col] = EMPTY;
+        const cell = getCell(row, col);
+        cell.classList.remove(RED, YELLOW, 'win');
+        cell.style.background = '';
+      });
+
+      usedUndo = true;
+      gameOver = false;
+      currentPlayer = RED;
+      statusEl.textContent = '';
+      statusEl.className = '';
+      turnText.textContent = 'Your turn';
+      discPrev.style.background = '#ff0000';
+      updateUndoBtn();
+    }
+
+    boardEl.addEventListener('click', e => {
+      if (gameOver || computerThinking) return;
+      const cell = e.target.closest('.cell');
+      if (!cell || currentPlayer !== RED) return;
       placePiece(+cell.dataset.col);
     });
-    boardEl.addEventListener('mouseover',e=>{
-      if(gameOver||computerThinking)return;
-      const cell=e.target.closest('.cell'); if(!cell)return;
-      boardEl.querySelectorAll(`[data-col="${cell.dataset.col}"]`).forEach(c=>{
-        if(!c.classList.contains(RED)&&!c.classList.contains(YELLOW)) c.style.background='#2c3e50';
+
+    boardEl.addEventListener('mouseover', e => {
+      if (gameOver || computerThinking) return;
+      const cell = e.target.closest('.cell'); if (!cell) return;
+      boardEl.querySelectorAll(`[data-col="${cell.dataset.col}"]`).forEach(c => {
+        if (!c.classList.contains(RED) && !c.classList.contains(YELLOW))
+          c.style.background = '#2c3e50';
       });
     });
-    boardEl.addEventListener('mouseout',e=>{
-      const cell=e.target.closest('.cell'); if(!cell)return;
-      boardEl.querySelectorAll(`[data-col="${cell.dataset.col}"]`).forEach(c=>{c.style.background='';});
+    boardEl.addEventListener('mouseout', e => {
+      const cell = e.target.closest('.cell'); if (!cell) return;
+      boardEl.querySelectorAll(`[data-col="${cell.dataset.col}"]`).forEach(c => {
+        c.style.background = '';
+      });
     });
-    function startGame(){
-      board=Array.from({length:ROWS},()=>Array(COLS).fill(EMPTY));
-      currentPlayer=RED; gameOver=false; computerThinking=false;
-      statusEl.textContent=''; statusEl.className='';
-      turnText.textContent='Your turn'; discPrev.style.background='#ff0000';
-      boardEl.innerHTML='';
-      for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
-        const cell=document.createElement('div');
-        cell.classList.add('cell'); cell.dataset.row=r; cell.dataset.col=c;
-        boardEl.appendChild(cell);
+
+    function startGame() {
+      board = Array.from({length: ROWS}, () => Array(COLS).fill(EMPTY));
+      gameOver = false;
+      computerThinking = false;
+      moveHistory = [];
+      usedUndo = false;
+      statusEl.textContent = '';
+      statusEl.className = '';
+
+      boardEl.innerHTML = '';
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          cell.dataset.row = r; cell.dataset.col = c;
+          boardEl.appendChild(cell);
+        }
+
+      if (Math.random() < 0.5) {
+        currentPlayer = YELLOW;
+        computerThinking = true;
+        turnText.textContent = 'Computer thinking...';
+        discPrev.style.background = '#ffff00';
+        updateUndoBtn();
+        setTimeout(() => {
+          placePiece(computerPickCol());
+          computerThinking = false;
+          updateUndoBtn();
+        }, 600);
+      } else {
+        currentPlayer = RED;
+        turnText.textContent = 'Your turn';
+        discPrev.style.background = '#ff0000';
+        updateUndoBtn();
       }
     }
-    resetBtn.addEventListener('click',startGame);
+
+    resetBtn.addEventListener('click', startGame);
+    undoBtn.addEventListener('click', undoMove);
     startGame();
   </script>
 </body>
 </html>
-
